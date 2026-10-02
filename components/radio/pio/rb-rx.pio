@@ -1,0 +1,96 @@
+.program rx_iq_sample
+.side_set 1 opt       ; 1-bit side-set (clock), optional
+
+; sideset_base = 6
+; data ready pin = GPIO 25
+; data pins = in_base = {18, 19, 20, 21}
+
+
+.wrap_target
+
+	jmp poll_ready
+
+read_sample:
+
+	;read meta data
+    nop 		side 1 [3]
+	in pins, 4 	side 0 [0]
+
+   ; read 6 × 4 bits = 24 bits ; I or Q sample
+    nop 		side 1 [3]
+    in pins, 4 	side 0 [0]
+
+    nop 		side 1 [3]
+    in pins, 4 	side 0 [0]
+
+    nop 		side 1 [3]
+    in pins, 4 	side 0 [0]
+
+    nop 		side 1 [3]
+    in pins, 4 	side 0 [0]
+
+    nop 		side 1 [3]
+    in pins, 4 	side 0 [0]
+
+    nop 		side 1 [3]
+    in pins, 4 	side 0 [0]
+	
+poll_ready:
+    nop 		side 1 [2]      
+    nop 		side 0 [2]      
+
+    jmp pin read_sample      	
+
+.wrap
+
+
+% c-sdk {
+static inline void rx_iq_sample_program_init(PIO pio, uint sm, uint offset) {
+
+//
+//++ IQ Data (input pins)  Initialize all data pins as input
+// 
+    const uint data_pins[] = {18, 19, 20, 21};
+    for (int i = 0; i < 4; i++) {
+        pio_gpio_init(pio, data_pins[i]); 						// Set this pin's GPIO function (connect PIO to the pad)
+		//pio_sm_set_consecutive_pindirs(pio, sm, data_pins[i], 1, false);  		// false =>  input
+	}
+	pio_sm_set_consecutive_pindirs(pio, sm, 18, 4, false);  // Configureer 4 inputs vanaf pin 18
+	
+//	
+// Sample ready input (input pin)
+//
+    pio_gpio_init(pio, 25);										// Set this pin's GPIO function (connect PIO to the pad)
+	pio_sm_set_consecutive_pindirs(pio, sm, 25, 1, false);  	// false =>  input
+
+//
+// Clock (output pin)
+//
+	pio_gpio_init(pio, 6);										// Set this pin's GPIO function (connect PIO to the pad)
+	pio_sm_set_consecutive_pindirs(pio, sm, 6, 1, true);  		// true =>  output
+
+//
+// pio state machine config settings
+//
+    pio_sm_config c = rx_iq_sample_program_get_default_config(offset);	
+
+    sm_config_set_clkdiv(&c, 2.0f);								// max clock speed.
+    
+	sm_config_set_sideset_pins(&c, 6);							// set sideset for pin 6; clock out.
+	
+	sm_config_set_in_pins(&c, 18);  							// continous set in from 18
+	
+	sm_config_set_jmp_pin(&c, 25);								// Stel pin 25 in als jmp-pin (voor poll_ready)
+
+	sm_config_set_in_shift(&c, false, true, 28);				// AUTOPUSH aan, bij 28 bits (shift left)
+
+//
+// No pin related initialization	
+//
+
+    pio_sm_init(pio, sm, offset, &c);							// Initialize the state machine
+    pio_sm_set_enabled(pio, sm, true);							// Enable the state machine
+}
+%}
+
+; end of source

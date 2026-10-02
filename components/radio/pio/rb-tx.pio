@@ -1,0 +1,76 @@
+.program tx_iq_sample
+.side_set 1 opt
+; sideset_base = 14   ; klok
+; data pin     = 15   ; OUT PINS base (1 bit)
+; ready pin    = 9  ; jmp pin
+
+.wrap_target
+idle:
+    jmp pin, start        side 1 [2]    ; klok hoog; bij ready=1 ga je starten
+    jmp idle              side 0 [2]    ; anders klok laag en blijf wachten
+
+start:
+    nop                   side 0 [2]    ; ***forceer eerst klok laag***
+    set x, 31                           ; 32 bits
+    pull block                          ; woord ophalen
+
+bitloop:
+    out pins, 1               			; bit uit, klok hoog
+	nop                  side 1 [2]
+    jmp x--, bitloop     side 0 [2]     ; klok laag, herhaal tot X==0
+    jmp idle                            ; terug naar idle
+.wrap
+
+
+% c-sdk {
+static inline void tx_iq_sample_program_init(PIO pio, uint sm, uint offset) {
+
+//
+//++ IQ Data (output pin)  Initialize data pin as output
+// 
+    pio_gpio_init(pio, 15); 						            // Set this pin's GPIO function (connect PIO to the pad)
+	pio_sm_set_consecutive_pindirs(pio, sm, 15, 1, true);       // Configureer 1 inputs vanaf pin 15 ; true =>  output.
+	
+//	
+// Sample ready input (input pin)
+//
+    pio_gpio_init(pio, 9);										// Set this pin's GPIO function (connect PIO to the pad)
+    gpio_pull_up(9);										    // Keep ready line high when FPGA is not actively driving.
+	pio_sm_set_consecutive_pindirs(pio, sm, 9, 1, false);  	    // false =>  input
+
+//
+// Clock (output pin)
+//
+    gpio_init(14);
+    gpio_set_dir(14, GPIO_OUT);
+    gpio_put(14, 0);											// Force clock low before assigning the pin to PIO.
+    pio_gpio_init(pio, 14);										// Set this pin's GPIO function (connect PIO to the pad)
+    pio_sm_set_consecutive_pindirs(pio, sm, 14, 1, true);  		// true =>  output
+
+//
+// pio state machine config settings
+//
+    pio_sm_config c = tx_iq_sample_program_get_default_config(offset);	
+
+    sm_config_set_clkdiv(&c, 12.0f);							// Slightly slower TX clock to reduce DMA underruns.
+    
+	sm_config_set_sideset_pins(&c, 14);							// set sideset for pin 14; clock out.
+	
+	sm_config_set_out_pins(&c, 15, 1);                          // continous set out from 15
+    sm_config_set_out_shift(&c, false, false, 32);				// shift left msb first. no autopull.	
+	
+	sm_config_set_jmp_pin(&c, 9);								// Stel pin 9 in als jmp-pin (voor poll_ready)
+
+
+//
+// No pin related initialization	
+//
+
+	pio_sm_set_pins_with_mask(pio, sm, 0u, 1u << 14);			// Keep TX clock low until the state machine starts.
+
+    pio_sm_init(pio, sm, offset, &c);							// Initialize the state machine
+    pio_sm_set_enabled(pio, sm, true);							// Enable the state machine
+}
+%}
+
+; end of source
